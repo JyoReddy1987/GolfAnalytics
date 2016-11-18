@@ -1,0 +1,154 @@
+---
+title: "Tournament Importance Plots"
+author: "Inki Sul"
+date: "December 17, 2015"
+output: pdf_document
+---
+
+Golf Project (Embarked: 9/23/2015)
+Tournament Importance Plots for Tiger Woods
+Last Updated: 12/17/2015
+Author:  Professor Chaithanya Bandi, Inki Sul
+
+Focusing on Tiger Woods, our favorite exemplary player, as always.
+
+```{r}
+require(e1071)
+require(stringr)
+library(reshape2)
+require(ggplot2)
+require(gridExtra)
+library(grid)
+library(gtable)
+require(UsingR)
+if(!require(coefplot)) { install.packages("coefplot"); require(coefplot)}
+if(!require(doBy)) { install.packages("doBy"); require(doBy)}
+if(!require(plyr)) { install.packages("plyr"); require(plyr)}
+if(!require(dplyr)) { install.packages("dplyr"); require(dplyr)}
+require(rpart)
+require(rpart.plot)
+library(randomForest)
+library(tree)
+library(party)
+if(!require(ROCR)) { install.packages("ROCR"); require(ROCR)}
+if(!require(forecast)) { install.packages("forecast"); require(forecast)}
+if(!require(zoo)) { install.packages("zoo"); require(zoo)}
+if(!require(neuralnet)) { install.packages("neuralnet"); require(neuralnet)}
+
+### Functions to be used later:
+# Reordering function within dataframe for prettier data
+moveMe <- function(data, tomove, where = "last", ba = NULL) {
+  temp <- setdiff(names(data), tomove)
+  x <- switch(
+    where,
+    first = data[c(tomove, temp)],
+    last = data[c(temp, tomove)],
+    before = {
+      if (is.null(ba)) stop("must specify ba column")
+      if (length(ba) > 1) stop("ba must be a single character string")
+      data[append(temp, values = tomove, after = (match(ba, temp)-1))]
+    },
+    after = {
+      if (is.null(ba)) stop("must specify ba column")
+      if (length(ba) > 1) stop("ba must be a single character string")
+      data[append(temp, values = tomove, after = (match(ba, temp)))]
+    })
+  return(x)
+}
+# Function used for plotting a histogram of forecast errors, with an overlaid N(0, SD) curve:
+plotForecastErrors <- function(forecasterrors)
+{
+  # make a histogram of the forecast errors:
+  mybinsize <- IQR(forecasterrors)/4
+  mysd   <- sd(forecasterrors)
+  mymin  <- min(forecasterrors) - mysd*5
+  mymax  <- max(forecasterrors) + mysd*3
+  # generate normally distributed data with mean 0 and standard deviation mysd
+  mynorm <- rnorm(10000, mean=0, sd=mysd)
+  mymin2 <- min(mynorm)
+  mymax2 <- max(mynorm)
+  if (mymin2 < mymin) { mymin <- mymin2 }
+  if (mymax2 > mymax) { mymax <- mymax2 }
+  # make a red histogram of the forecast errors, with the normally distributed data overlaid:
+  mybins <- seq(mymin, mymax, mybinsize)
+  hist(forecasterrors, col="red", freq=FALSE, breaks=mybins)
+  # freq=FALSE ensures the area under the histogram = 1
+  # generate normally distributed data with mean 0 and standard deviation mysd
+  myhist <- hist(mynorm, plot=FALSE, breaks=mybins)
+  # plot the normal curve as a blue line on top of the histogram of forecast errors:
+  points(myhist$mids, myhist$density, type="l", col="blue", lwd=2)
+}
+getwd()
+setwd("C:/Users/Inki Sul/Documents/Current Documents/Research/Golf/raw-data")
+
+# Read in event level raw data + tournament importance
+data <- read.csv('event-level-raw-comparisonTest-importance.csv',header=TRUE, sep=",",row.names=NULL)
+# Subsetting the data for Tiger Woods and its performance variables
+tiger <- {
+  d <- subset(data[grep("Tiger", data$Player.First.Name, ignore.case = TRUE, fixed = FALSE),], select=c(1,2,3,4,8,9,10,14,195,197,118,78,79))
+  d <- d[order(d$Tournament.Year,d$Tournament.Number),]
+  d$Tournament.Order <- 1:nrow(unique(data.frame(x=d$Tournament.Year, y=d$Tournament.Number)))
+  d
+}
+tiger$SG_Total <- tiger$SG_T2G + tiger$SG_Putts
+```
+
+Now, take a look at the original Strokes Gained plot for Tiger Woods.
+```{r, echo=FALSE}
+SG <- ggplot(melt(subset(tiger, select=c(14,9,10)), id=1), aes(Tournament.Order,value,fill=variable)) + 
+  geom_bar(position="dodge",stat="identity") + 
+  theme(legend.justification = c(0, 1), legend.position = c(0, 1))
+print(SG)
+```
+
+What follow are the Strokes Gained and its compenents plotted against tournament order numbered chronologically, or against player age.
+```{r, echo=FALSE}
+SGT1 <- ggplot(tiger, aes(x=Tournament.Order,y=SG_Total,group=Tournament.Importance)) + 
+  geom_line(aes(colour=Tournament.Importance)) + 
+  theme(legend.justification = c(0, 1), legend.position = c(0, 1))
+print(SGT1)
+
+SGT2 <- ggplot(tiger, aes(x=Player.Age.Numeric,y=SG_Total,group=Tournament.Importance)) + 
+  geom_line(aes(colour=Tournament.Importance)) + 
+  theme(legend.justification = c(0, 1), legend.position = c(0, 1))
+print(SGT2)
+
+SGPutt1 <- ggplot(tiger, aes(x=Tournament.Order,y=SG_Putts,group=Tournament.Importance)) + 
+  geom_line(aes(colour=Tournament.Importance)) + 
+  theme(legend.justification = c(0, 1), legend.position = c(0, 1))
+print(SGPutt1)
+
+SGPutt2 <- ggplot(tiger, aes(x=Player.Age.Numeric,y=SG_Putts,group=Tournament.Importance)) + 
+  geom_line(aes(colour=Tournament.Importance)) + 
+  theme(legend.justification = c(0, 1), legend.position = c(0, 1))
+print(SGPutt2)
+
+SGT2G1 <- ggplot(tiger, aes(x=Tournament.Order,y=SG_T2G,group=Tournament.Importance)) + 
+  geom_line(aes(colour=Tournament.Importance)) + 
+  theme(legend.justification = c(0, 1), legend.position = c(0, 1))
+print(SGT2G1)
+
+SGT2G2 <- ggplot(tiger, aes(x=Player.Age.Numeric,y=SG_T2G,group=Tournament.Importance)) + 
+  geom_line(aes(colour=Tournament.Importance)) + 
+  theme(legend.justification = c(0, 1), legend.position = c(0, 1))
+print(SGT2G2)
+```
+
+We can also take a look at some other key performance metric: Greens in Regulation Percentage as well. (No zero dropped as NA)
+
+```{r, echo=FALSE}
+GIR_original <- ggplot(tiger, aes(x=Tournament.Order,y=Total_GIR)) + geom_line()
+print(GIR_original)
+
+GIR_importance1 <- ggplot(tiger, aes(x=Tournament.Order,y=Total_GIR,group=Tournament.Importance)) + 
+  geom_line(aes(colour=Tournament.Importance)) + 
+  theme(legend.justification = c(0, 1), legend.position = c(0, 1))
+print(GIR_importance1)
+
+GIR_importance2 <- ggplot(tiger, aes(x=Player.Age.Numeric,y=Total_GIR,group=Tournament.Importance)) + 
+  geom_line(aes(colour=Tournament.Importance)) + 
+  theme(legend.justification = c(0, 1), legend.position = c(0, 1))
+print(GIR_importance2)
+```
+
+More to follow.....

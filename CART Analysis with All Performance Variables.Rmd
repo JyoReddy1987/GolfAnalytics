@@ -1,0 +1,202 @@
+---
+title: "CART Analysis with All Performance Variables"
+author: "Inki Sul"
+date: "October 27, 2015"
+output: pdf_document
+---
+
+Golf Project (Embarked: 9/23/2015)
+CART analysis for all variables vs. Draft Kings Score
+Last Updated: 10/26/2015
+Author:  Professor Chaithanya Bandi, Inki Sul
+
+
+I am trying to subset the raw data that we have for all variables involved at first, and then try subsetting data for including and excluding rank variables. First, we include all variables including the ranks:
+
+```{r}
+require(e1071)
+require(stringr)
+library(reshape2)
+require(ggplot2)
+require(gridExtra)
+library(grid)
+library(gtable)
+require(UsingR)
+if(!require(coefplot)) { install.packages("coefplot"); require(coefplot)}
+if(!require(doBy)) { install.packages("doBy"); require(doBy)}
+if(!require(plyr)) { install.packages("plyr"); require(plyr)}
+if(!require(dplyr)) { install.packages("dplyr"); require(dplyr)}
+require(rpart)
+require(rpart.plot)
+library(randomForest)
+library(tree)
+library(party)
+
+getwd()
+setwd("C:/Users/Inki Sul/Documents/Current Documents/Research/Golf/raw-data")
+
+### Function used for reordering:
+moveMe <- function(data, tomove, where = "last", ba = NULL) {
+  temp <- setdiff(names(data), tomove)
+  x <- switch(
+    where,
+    first = data[c(tomove, temp)],
+    last = data[c(temp, tomove)],
+    before = {
+      if (is.null(ba)) stop("must specify ba column")
+      if (length(ba) > 1) stop("ba must be a single character string")
+      data[append(temp, values = tomove, after = (match(ba, temp)-1))]
+    },
+    after = {
+      if (is.null(ba)) stop("must specify ba column")
+      if (length(ba) > 1) stop("ba must be a single character string")
+      data[append(temp, values = tomove, after = (match(ba, temp)))]
+    })
+  return(x)
+}
+
+data <- read.csv('event-level-raw.csv',header=TRUE, sep=",",row.names=NULL)
+newdata <-subset(data, select = 51:201)
+system.time(fit_raw <- rpart(DK.Score ~ ., method="anova", data=newdata))
+printcp(fit_raw)
+```
+
+You can observe that the main variables that were used in the tree construction include Driving Accuracy Percentage (Possible Fairways), the rank variable of Strokes Gained Total, and Total GIR %. The following is the summary of the fit.
+
+```{r}
+summary(fit_raw)
+```
+
+We can also observe the R-squared plots of the splits, which are as follows.
+
+```{r, echo=FALSE}
+rsq.rpart(fit_raw)
+```
+
+The number below presents the MSE of the model calculated based on the predictions.
+```{r}
+newdata$CART.Prediction <- predict(fit_raw, newdata=newdata)
+newdata$SE.CART <- (newdata$DK.Score - newdata$CART.Prediction)^2
+mean(newdata$SE.CART)
+newdata$SE.CART <- NULL
+newdata$CART.Prediction <- NULL
+```
+Plot of the resulting tree is as follows:
+```{r, echo=FALSE}
+plot(fit_raw, uniform=TRUE, main="Regression Tree (RAW) for DraftKings Score")
+text(fit_raw, use.n=TRUE, all=TRUE, cex=.8)
+```
+Now, the pruned version of tree is as follows:
+```{r}
+pfit_raw <- prune(fit_raw, cp=0.01159207) # from cptable
+```
+```{r, echo=FALSE}
+plot(pfit_raw, uniform=TRUE, main="Pruned Regression Tree (RAW) for DraftKings Score")
+text(pfit_raw, use.n=TRUE, all=TRUE, cex=.8)
+```
+
+Now follows the additional CART analysis using "tree"" package.
+```{r}
+system.time(tree <- tree(DK.Score ~ ., data=newdata))
+summary(tree)
+```
+Again, we observe similar results: we have the rank variable of Strokes Gained Total, Total GIR %, and Strokes Gained Total variable itself included in the tree. Plot of the tree follows: 
+```{r, echo=FALSE}
+plot(tree)
+text(tree)
+```
+I now sum up the CART analysis with tree package with presenting the MSE results:
+```{r}
+newdata$tree.Prediction <- predict(tree, newdata=newdata)
+newdata$SE.tree <- (newdata$DK.Score - newdata$tree.Prediction)^2
+mean(newdata$SE.tree)
+newdata$SE.tree <- NULL
+newdata$tree.Prediction <- NULL
+```
+
+Random Forest model - Notice that I have opted out to omit the NA data entries. It may be a source of trouble. Running time of the model is included.
+```{r}
+system.time(fit.rf <- randomForest(DK.Score ~ ., data=newdata, na.action=na.omit))
+print(fit.rf)
+```
+The importance of the variables included in the model is plotted here.
+```{r, echo=FALSE}
+plot(importance(fit.rf), lty=2, pch=16)
+lines(importance(fit.rf))
+varImpPlot(fit.rf, sort=TRUE)
+```
+The main variables of importance include: Rank variable of Strokes Gained Total, Total Strokes Gained, Total GIR %, Strokes Gained: Tee to Green and its rank variable, and Scrambling # Missed GIR (attempts), which denotes the number of times a player missed the green in regulation, but still made par or better. This may compensate a player's skill to still score without penalty even if he did not record a GIR.
+
+Next step is to exclude all the rank variables for better clarity. Notice that I had also left out Total Strokes Gained since it is merely the sum of two components of SG.
+```{r}
+data <- moveMe(data, c("Longest.Drive..Rank.", "Driving.Distance..Rank.", "Driving.Dist....All.Drives.Rank.", "Driving.Accuracy.Rank", "Total.Driving..Rank.", "GIR.Rank", "Proximity.to.Hole..Rank.", "Fairway.Prox..Rank.", "Rough.Prox..Rank.", "Scrambling..Rank.", "Scrambling.Proximity..rank.", "Sand.Save..Rank.", "Putting.Inside.5.Feet..Rank.", "Putting...5....10...Rank.", "Putting...4....8...Rank.", "Putting.Inside.10..rank.", "Putting...10..15..rank.", "Putting...15..20..rank.", "Putting...15..20..rank.", "Putting...20..25..rank.", "Putting....25..rank.", "Putting.....10...rank.", "Putts.Gained.Rank", "SG..T2G.Rank", "SG..Total.Rank", "TTL.SG.Total"), "after","Birdie.or.Better.Conv.....Greens.Hit.")
+newdata <-subset(data, select = 77:202)
+system.time(fit_raw2 <- rpart(DK.Score ~ ., method="anova", data=newdata))
+printcp(fit_raw2)
+```
+
+Main variables used in tree construction: Driving Accuracy Percentage (Possible Fairways), One Putt % (# of one-putts), which means the number of holes on which the player had only one putt, and again, the total GIR %. The following is the summary of the fit.
+
+```{r}
+summary(fit_raw2)
+```
+
+We can also observe the R-squared plots of the splits, which are as follows.
+
+```{r, echo=FALSE}
+rsq.rpart(fit_raw2)
+```
+
+The number below presents the MSE of the model calculated based on the predictions. Notice that MSE increases due to dropped rank variables, which seemed to have much predictive power.
+```{r}
+newdata$CART.Prediction <- predict(fit_raw2, newdata=newdata)
+newdata$SE.CART <- (newdata$DK.Score - newdata$CART.Prediction)^2
+mean(newdata$SE.CART)
+newdata$SE.CART <- NULL
+newdata$CART.Prediction <- NULL
+```
+Plot of the resulting tree is as follows:
+```{r, echo=FALSE}
+plot(fit_raw2, uniform=TRUE, main="Regression Tree (RAW without rank variables) for DraftKings Score")
+text(fit_raw2, use.n=TRUE, all=TRUE, cex=.8)
+```
+Now, the pruned version of tree is as follows:
+```{r}
+pfit_raw2 <- prune(fit_raw2, cp=0.01287719) # from cptable
+```
+```{r, echo=FALSE}
+plot(pfit_raw2, uniform=TRUE, main="Pruned Regression Tree (RAW without rank variables) for DraftKings Score")
+text(pfit_raw2, use.n=TRUE, all=TRUE, cex=.8)
+```
+
+Now follows the additional CART analysis using "tree"" package.
+```{r}
+system.time(tree2 <- tree(DK.Score ~ ., data=newdata))
+summary(tree2)
+```
+Main variables used in tree construction: Strokes Gained: Tee to Green, total GIR %, Driving Distance (Total Distance), Strokes Gained: Putting, and Going for the Green (# of Successes) which denotes the number of times a player's first shot on a par 4 hole or second shot on a par 5 hole land on the green - slightly modified version of the GIR %. The following is the summary of the fit.
+```{r, echo=FALSE}
+plot(tree2)
+text(tree2)
+```
+I now sum up the CART analysis with tree package with presenting the MSE results:
+```{r}
+newdata$tree.Prediction <- predict(tree2, newdata=newdata)
+newdata$SE.tree <- (newdata$DK.Score - newdata$tree.Prediction)^2
+mean(newdata$SE.tree)
+newdata$SE.tree <- NULL
+newdata$tree.Prediction <- NULL
+```
+
+Random Forest model:
+```{r}
+system.time(fit.rf2 <- randomForest(DK.Score ~ ., data=newdata, na.action=na.omit))
+print(fit.rf2)
+```
+The importance of the variables included in the model is plotted here.
+```{r, echo=FALSE}
+plot(importance(fit.rf2), lty=2, pch=16)
+lines(importance(fit.rf2))
+varImpPlot(fit.rf2, sort=TRUE)
+```
+The main variables of importance include: Strokes Gained: Tee to Green, total GIR %, Strokes Gained: Putting, Overall Putting Average (Total Putts), which denotes the total number of putts a player used to complete an event, Scrambling # of Missed GIR (attempts), which denotes the number of times in the event a player missed the green in regulation, and etc.. It is interesting to see some mixed results from different modeling techniques.
